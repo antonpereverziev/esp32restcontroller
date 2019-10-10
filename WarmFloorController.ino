@@ -1,3 +1,5 @@
+#include <dummy.h>
+
 #include <WiFi.h>
 #include <WiFiClient.h>
 #include <WebServer.h>
@@ -24,6 +26,7 @@ WebServer server(80);
 
 const int mainPageSize = 3000;
 char* kitchenHostname = "warm.floor.kitchen";
+char* successResponse = "<html><head><meta charset='UTF-8'/></head><body><b>Новое значение сохранено!</b><br><a href='/'><b>Назад</b></a></body></html>";
 int power = 500;
 int consumption = 650;
 int intervalsQuantity = 10;
@@ -32,14 +35,17 @@ int begin_m;
 int end_h;
 int end_m;
 int fullCycleTime = 100;
+int totalTimeSeconds = 0;
 int calculatedIntervalSeconds = 100;
 int calculatedHeatTimeSeconds = 0;
 int now_h;
 int now_m;
 boolean isHeatTime;
 int counter = 0;
-int currentHeatingCycle = 0;
-int nextCycleSeconds = 0;
+int currentHeatingCycle = -1;
+int next_h;
+int next_m;
+int next_s;
 
 String token = "A3QqMemiiJWCKC9D038ST5MEEtWgqG";
 String log_idvariable = "5d99edf1c03f974dca29a9f4";
@@ -103,43 +109,59 @@ void setup(void) {
   getLocalTime();
   loadDataFromEeprom();
   calcIntervals();
-  
-  server.on("/", handleRoot);
-  server.on("/powerinput", savePower);
-  server.on("/consumptioninput", saveConsumption);
-  server.on("/intervalsQuantityinput", saveInterval);
-  server.on("/endTimeinput", saveEndTime);
-  server.on("/enableHeatingNow", enableHeating);
-  server.on("/error", []() {
-    server.send(200, "text/plain", "Error!!");
-  });
-  server.onNotFound(handleNotFound);
-  server.begin();
-  Serial.println("HTTP server started");
+  initAndBeginServer();
+ 
 }
-
 
 void loop(void) {
   if (counter++ == 500000) {
     counter = 0;
     getLocalTime();
     int secondsFromStart = (now_h-begin_h)*3600 + (now_m - begin_m)*60;
-    Serial.println("Seconds From Start: " + String( secondsFromStart));
-    int cyclesFromStart = secondsFromStart/fullCycleTime;
-    nextCycleSeconds = (currentHeatingCycle + 1) * fullCycleTime - secondsFromStart;
-    Serial.println(" nextEnablementTime " + String(nextCycleSeconds));
+    Serial.println("Seconds From Start: " + String(secondsFromStart));
+    int cyclesFromStart = -1;
+    if (secondsFromStart>=0) {
+      cyclesFromStart = secondsFromStart/fullCycleTime;
+    }
     Serial.println("cyclesFromStart: " + String( cyclesFromStart));
     Serial.println("currentHeatingCycle: " + String(currentHeatingCycle));
+    int absoluteEnableTime = begin_h*3600+begin_m*60+(currentHeatingCycle + 1) * fullCycleTime;
+    Serial.println("currentHeatingCycle: " + String(absoluteEnableTime));
+    next_h = absoluteEnableTime/3600;
+    next_m = (absoluteEnableTime%3600)/60;
+    next_s = absoluteEnableTime%60;
     
-    if (cyclesFromStart > 0 && cyclesFromStart > currentHeatingCycle && cyclesFromStart < intervalsQuantity) {
+    if (cyclesFromStart > -1 && cyclesFromStart > currentHeatingCycle && cyclesFromStart < intervalsQuantity) {
       enableHeatingNow();
       currentHeatingCycle++;
-    } else if (cyclesFromStart > intervalsQuantity) {
-      currentHeatingCycle = 0;
+      next_h = absoluteEnableTime/3600;
+      next_m = (absoluteEnableTime%3600)/60;
+      next_s = absoluteEnableTime%60;
+    } else if (cyclesFromStart > intervalsQuantity || secondsFromStart < 0) {
+      currentHeatingCycle = -1;
+      next_h = begin_h;
+      next_m = begin_m;
+      next_s = 0;
     }
   }
-  
   server.handleClient();
+}
+
+void  initAndBeginServer() {
+  server.on("/", handleRoot);
+  server.on("/powerinput", savePower);
+  server.on("/consumptioninput", saveConsumption);
+  server.on("/intervalsQuantityinput", saveInterval);
+  server.on("/beginTimeinput", saveBeginTime);
+  server.on("/endTimeinput", saveEndTime);
+  server.on("/enableHeatingNow", enableHeating);
+  server.on("/adjustTime", adjustTime);
+  server.on("/error", []() {
+    server.send(200, "text/plain", "Error!!");
+  });
+  server.onNotFound(handleNotFound);
+  server.begin();
+  Serial.println("HTTP server started");
 }
 
 void handleRoot() {
@@ -166,7 +188,7 @@ void handleRoot() {
       button.type = 'submit';\
       button.id = elementId + 'button';\
       var para = document.createElement('input');\
-      para.id = elementId + 'input';\ 
+      para.id = elementId + 'input';\
       para.type = 'text';\
       var element = document.getElementById(elementId);\
       element.appendChild(para);\
@@ -181,40 +203,52 @@ window.location.href = '/' + parameter + 'input?value=' + x.value;\
 </head>\
 <body>\
 <h1>Панель управления теплыми полами</h1>\
-<h3>Текущее время: %d:%d:%d</h3>\
-<h2>Теплый пол кухня. Состояние: %s<b>вкл</b>. Следующее включение через <b>%d мин</b></h2>\
-<div id='beginTime'>Время включения <b>8:00</b> <a id='beginTimeChange' href=\"javascript:addInput('beginTime');\">Изменить</a></div>\
-<div id='endTime'>Время выключения <b>%d:%d</b> <a id='endTimeChange' href=\"javascript:addInput('endTime');\">Изменить</a></div>\
+<h3>Текущее время: %02d:%02d:%02d</h3>\
+<h2>Теплый пол кухня. Состояние: %s<b>вкл</b>. Следующее включение в <b>%02d:%02d:%02d</b></h2>\
+<div id='beginTime'>Время включения <b>%02d:%02d</b> <a id='beginTimeChange' href=\"javascript:addInput('beginTime');\">Изменить</a></div>\
+<div id='endTime'>Время выключения <b>%02d:%02d</b> <a id='endTimeChange' href=\"javascript:addInput('endTime');\">Изменить</a></div>\
 <div id='consumption'>Расход электроэнергии <b>%d</b> Вт*ч <a id='consumptionChange' href=\"javascript:addInput('consumption');\">Изменить</a></div>\
 <div id='intervalsQuantity'>Количество включений <b>%d</b> раз в день <a id='intervalsQuantityChange' href=\"javascript:addInput('intervalsQuantity');\">Изменить</a></div>\
 <div id='power'>Мощность нагревательного шнура <b>%d</b> Вт <a id='powerChange' href=\"javascript:addInput('power');\">Изменить</a></div>\
-<div id='hostname'>Имя хоста контроллера <b>%s</b> <a id='hostnameChange' href=\"javascript:addInput('hostname');\">Изменить</a></div>\
+<div id='hostname'>Имя хоста контроллера <b>%s</b></div>\
 <h3>Расчитанные параметры:</h3>\
-<br/>Длительность охлаждения %d мин\
-<br/>Длительность нагрева %d мин\
+<br/>Общее время работы %s\
+<br/>Длительность охлаждения %s\
+<br/>Длительность нагрева %s\
 <br/><br/><a href='/enableHeatingNow'> Включить нагрев сейчас</a>\
+<br/><br/><a href='/adjustTime'> Настроить время</a>\
 </body>\
 </html>",
-now.hour(),
-now.minute(),
-now.second(),
-String(isHeatTime),
-nextCycleSeconds,
-end_h, 
-end_m,
-consumption,
-intervalsQuantity,
-power,
-kitchenHostname,
-calculatedIntervalSeconds,
-calculatedHeatTimeSeconds
-);
+           now.hour(),
+           now.minute(),
+           now.second(),
+           String(isHeatTime),
+           next_h,
+           next_m,
+           next_s,
+           begin_h,
+           begin_m,
+           end_h,
+           end_m,
+           consumption,
+           intervalsQuantity,
+           power,
+           kitchenHostname,
+           convertToMinutes(totalTimeSeconds),
+           convertToMinutes(calculatedIntervalSeconds),
+           convertToMinutes(calculatedHeatTimeSeconds)
+          );
   server.send(200, "text/html", temp);
 }
 
 void enableHeating () {
   enableHeatingNow();
   server.send(200, "text/plain", "Saved");
+}
+
+void adjustTime () {
+  getLocalTime();
+  rtc.adjust(DateTime(2019, 10, 5, now_h, now_m, 0));
 }
 
 void enableHeatingNow() {
@@ -238,27 +272,25 @@ void enableHeatingNow() {
 }
 
 void calcIntervals() {
-  Serial.println("calcIntervals");
   int totalEnablementTimeSeconds = consumption*60*60/power;
-  Serial.println(totalEnablementTimeSeconds);
-  int totalTimeSeconds = (end_h-begin_h)*3600 + (end_m-begin_m)*60;
-  Serial.println(totalTimeSeconds);
+  totalTimeSeconds = (end_h-begin_h)*3600 + (end_m-begin_m)*60;
+  if (totalTimeSeconds < 0) {
+    totalTimeSeconds = 24*3600+totalTimeSeconds; 
+  }
   calculatedHeatTimeSeconds = totalEnablementTimeSeconds/intervalsQuantity;
-  Serial.println(calculatedHeatTimeSeconds);
   fullCycleTime = totalTimeSeconds/intervalsQuantity;
   calculatedIntervalSeconds = fullCycleTime-calculatedHeatTimeSeconds;
-  Serial.println(calculatedIntervalSeconds);
   int secondsFromStart = (now_h-begin_h)*3600 + (now_m - begin_m)*60;
-  Serial.println("Seconds From Start: " + String( secondsFromStart));
-  currentHeatingCycle = secondsFromStart/fullCycleTime;
-  Serial.println("currentHeatingCycle: " + String(currentHeatingCycle));
-  int lastCycleTime = secondsFromStart - fullCycleTime*currentHeatingCycle;
-  Serial.println("lastCycleTime: " + String(lastCycleTime)); 
+  if (secondsFromStart < 0) {
+    currentHeatingCycle = -1;
+  } else {
+    currentHeatingCycle = secondsFromStart/fullCycleTime;
+  }
+  int lastCycleTime = secondsFromStart - fullCycleTime*currentHeatingCycle; 
 }
 
 void loadDataFromEeprom() {
   prefs.begin("app_params");
-  Serial.println("Loading data");
   size_t schLen = prefs.getBytesLength("app_params");
   char buffer[schLen]; // prepare a buffer for the data
   prefs.getBytes("app_params", buffer, schLen);
@@ -283,7 +315,6 @@ void loadDataFromEeprom() {
 void saveDataToEeprom(){
   uint16_t content[] = {(uint16_t)power, (uint16_t)consumption, (uint16_t)intervalsQuantity, (uint16_t)begin_h, (uint16_t) begin_m, (uint16_t)end_h, (uint16_t) end_m};
   prefs.putBytes("app_params", content, sizeof(content));
-  Serial.println("Data saved");
   calcIntervals();
 }
 
@@ -296,7 +327,7 @@ void savePower() {
     }
   }
   saveDataToEeprom();
-  server.send(200, "text/plain", "Saved");
+  sendSuccessResponse();
 }
 
 void saveConsumption() {
@@ -307,7 +338,7 @@ void saveConsumption() {
     }
   }
   saveDataToEeprom();
-  server.send(200, "text/plain", "Saved");
+  sendSuccessResponse();
 }
 
 void saveInterval() {
@@ -318,7 +349,7 @@ void saveInterval() {
     }
   }
   saveDataToEeprom();
-  server.send(200, "text/plain", "Saved");
+  sendSuccessResponse();
 }
 
 void saveEndTime() {
@@ -331,13 +362,25 @@ void saveEndTime() {
     }
   }
   saveDataToEeprom();
-  server.send(200, "text/plain", "Saved");
+  sendSuccessResponse();
 }
 
-void types(String a){Serial.println("it's a String");}
-void types(int a)   {Serial.println("it's an int");}
-void types(char* a) {Serial.println("it's a char*");}
-void types(float a) {Serial.println("it's a float");}
+void saveBeginTime() {
+  for (uint16_t i = 0; i < server.args(); i++) {
+    if (server.argName(i) == "value") {
+      String endTime = server.arg(i);
+      begin_h = endTime.substring(0,2).toInt();
+      begin_m = endTime.substring(3).toInt();
+      break;
+    }
+  }
+  saveDataToEeprom();
+  sendSuccessResponse();
+}
+
+void sendSuccessResponse() {
+  server.send(200, "text/html", successResponse);
+}
 
 void getLocalTime()
 {
@@ -349,16 +392,12 @@ void getLocalTime()
   Serial.println(&timeinfo, "%A, %B %d %Y %H:%M:%S");
   now_h = timeinfo.tm_hour;
   now_m = timeinfo.tm_min;
+}
 
-  
-  /*if (rtc.lostPower()) {
-    Serial.println("RTC lost power, lets set the time!");
-    // following line sets the RTC to the date &amp; time this sketch was compiled
-    //rtc.adjust(DateTime(F(__DATE__), F(__TIME__)));
-    // This line sets the RTC with an explicit date &amp; time, for example to set
-    // January 21, 2014 at 3am you would call:
-    rtc.adjust(DateTime(2019, 10, 5, timeinfo.tm_hour, timeinfo.tm_min, 0));
-  }*/
+String convertToMinutes(int seconds) {
+  char arr[6];
+  snprintf(arr, 6, "%02d:%02d", (seconds/60), (seconds%60));
+  return String(arr);
 }
 
 void logDeviceBooted() {
@@ -389,4 +428,9 @@ void ubiSave_value(String value, String idvariable) {
   }
   http.end();
 }
+
+void types(String a){Serial.println("it's a String");}
+void types(int a)   {Serial.println("it's an int");}
+void types(char* a) {Serial.println("it's a char*");}
+void types(float a) {Serial.println("it's a float");}
 
