@@ -47,9 +47,6 @@ int next_h;
 int next_m;
 int next_s;
 
-String token = "A3QqMemiiJWCKC9D038ST5MEEtWgqG";
-String log_idvariable = "5d99edf1c03f974dca29a9f4";
-
 typedef struct {
   uint16_t power;
   uint16_t consumption;
@@ -98,8 +95,6 @@ void setup(void) {
   Serial.println(ssid);
   Serial.print("IP address: ");
   Serial.println(WiFi.localIP());
-
-  logDeviceBooted();
   
   if (MDNS.begin("esp32")) {
     Serial.println("MDNS responder started");
@@ -322,7 +317,6 @@ void savePower() {
   for (uint16_t i = 0; i < server.args(); i++) {
     if (server.argName(i) == "value") {
       power = server.arg(i).toInt();
-      types(power);
       break;
     }
   }
@@ -399,38 +393,3 @@ String convertToMinutes(int seconds) {
   snprintf(arr, 6, "%02d:%02d", (seconds/60), (seconds%60));
   return String(arr);
 }
-
-void logDeviceBooted() {
-  ubiSave_value("1", log_idvariable); 
-}
-void logSwitchOn() {
-}
-void logSwitchOff() {
-   ubiSave_value("0", log_idvariable);
-}
-void ubiSave_value(String value, String idvariable) {
-  HTTPClient http;
-  http.begin("http://things.ubidots.com/api/v1.6/variables/"+idvariable+"/values");
-  http.addHeader("Host", "things.ubidots.com");
-  http.addHeader("Content-Type", "application/json");
-  http.addHeader("X-Auth-Token", token);
-  int httpResponseCode = http.POST("{\"value\": " + String(value)+"}");
-  if (httpResponseCode > 0) {
-    // HTTP header has been send and Server response header has been handled
-    Serial.printf("[HTTP] POST... code: %d\n", httpResponseCode);
-    // file found at server
-    if (httpResponseCode == HTTP_CODE_OK) {
-      String payload = http.getString();
-      Serial.println(payload);
-    }
-  } else {
-    Serial.printf("[HTTP] POST... failed, error: %s\n", http.errorToString(httpResponseCode).c_str());
-  }
-  http.end();
-}
-
-void types(String a){Serial.println("it's a String");}
-void types(int a)   {Serial.println("it's an int");}
-void types(char* a) {Serial.println("it's a char*");}
-void types(float a) {Serial.println("it's a float");}
-
