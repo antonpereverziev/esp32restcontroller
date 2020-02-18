@@ -212,7 +212,7 @@ window.location.href = '/' + parameter + 'input?value=' + x.value;\
 <div id='power'>Мощность нагревательного шнура <b>%d</b> Вт <a id='powerChange' href=\"javascript:addInput('power');\">Изменить</a></div>\
 <div id='hostname'>Имя хоста контроллера <b>%s</b></div>\
 <h3>Расчитанные параметры:</h3>\
-<br/>Общее время работы %s\
+<br/>Общее время работы %s ч\
 <br/>Длительность охлаждения %s\
 <br/>Длительность нагрева %s\
 <br/><br/><a href='/enableHeatingNow'> Включить нагрев сейчас</a>\
@@ -234,7 +234,7 @@ window.location.href = '/' + parameter + 'input?value=' + x.value;\
            intervalsQuantity,
            power,
            kitchenHostname,
-           convertToMinutes(totalTimeSeconds),
+           convertToMinutes(totalTimeSeconds/60),
            convertToMinutes(calculatedIntervalSeconds),
            convertToMinutes(calculatedHeatTimeSeconds)
           );
