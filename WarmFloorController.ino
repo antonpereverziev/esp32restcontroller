@@ -17,7 +17,7 @@ char daysOfTheWeek[7][12] = {"Sunday", "Monday", "Tuesday", "Wednesday", "Thursd
 Preferences prefs;
 
 const char *ssid = "MikroTik-2";
-const char *password = "06092014";
+const char *password = "*****";
 const char* ntpServer = "pool.ntp.org";
 const long  gmtOffset_sec = 3600*2;
 const int   daylightOffset_sec = 3600;
